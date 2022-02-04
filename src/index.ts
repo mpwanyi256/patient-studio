@@ -9,7 +9,7 @@ import taxRates from './data/taxRate.json'
  *
  * @returns array of strings
  */
-export async function returnSiteTitles() {
+export async function returnSiteTitles(): Promise<string[]> {
   const urls = [
     'https://patientstudio.com/',
     'https://www.startrek.com/',
@@ -17,20 +17,19 @@ export async function returnSiteTitles() {
     'https://www.neowin.net/'
   ]
 
-  const titles = []
+  const titles: Array<string> = []
 
-  for (const url of urls) {
-    const response = await fetch(url, { method: 'GET' })
-
-    if (response.status === 200) {
-      const data = await response.text()
-      const match = data.match(/<title>(.*?)<\/title>/)
-      if (match?.length) {
-        titles.push(match[1])
-      }
-    }
-  }
-
+  await Promise.all(
+    urls.map(url =>
+      fetch(url, { method: 'GET' }).then(async response => {
+        if (response.status === 200) {
+          const data = await response.text()
+          const match = data.match(/<title>(.*?)<\/title>/)
+          if (match?.length) titles.push(match[1])
+        }
+      })
+    )
+  )
   return titles
 }
 
@@ -46,21 +45,26 @@ export async function returnSiteTitles() {
 export function findTagCounts(localData: Array<SampleDateRecord>): Array<TagCounts> {
   const tagCounts: Array<TagCounts> = []
 
-  for (let i = 0; i < localData.length; i++) {
-    const tags = localData[i].tags
+  /* 
+    Get all tags from localData (This will have repeted tags)
+    I'm using .flat() to have all tags in one array instead of
+    having an array of arrays :: [[],[], []] flat()=> []
+  */
+  const tags: Array<string> = localData.map(d => d.tags).flat()
 
-    for (let j = 0; j < tags.length; j++) {
-      const tag = tags[j]
+  /* 
+    Create a set which will hold unique tags
+    This helps in a way that we will make fewer iterations
+  */
+  const uniqueTags: Set<string> = new Set(tags)
 
-      for (let k = 0; k < tagCounts.length; k++) {
-        if (tagCounts[k].tag === tag) {
-          tagCounts[k].count++
-        } else {
-          tagCounts.push({ tag, count: 1 })
-        }
-      }
-    }
-  }
+  uniqueTags.forEach(el => {
+    const itemOccurrence: Array<string> = tags.filter(t => t === el)
+    tagCounts.push({
+      tag: el,
+      count: itemOccurrence.length
+    })
+  })
 
   return tagCounts
 }
@@ -78,6 +82,31 @@ export function findTagCounts(localData: Array<SampleDateRecord>): Array<TagCoun
  *  - if the imported item is on the "category exceptions" list, then no tax rate applies
  */
 export function calcualteImportCost(importedItems: Array<ImportedItem>): Array<ImportCostOutput> {
-  // please write your code in here.
-  // note that `taxRate` has already been imported for you
+  // This function returns a new array with the map function
+
+  return importedItems.map(importItem => {
+    /* Find the item tax rate based on the countryDestination 
+      and the fact that it's not exempted from taxes
+    */
+    const itemTax = taxRates.find(
+      tax => tax.country == importItem.countryDestination && !tax.categoryExceptions.includes(importItem.category)
+    )
+
+    const { unitPrice, quantity, name } = importItem
+    const subtotal: number = unitPrice * quantity
+    let importCost = 0
+
+    if (itemTax && itemTax.importTaxRate) {
+      importCost = subtotal * itemTax.importTaxRate
+    }
+
+    const totalCost: number = importCost + subtotal
+
+    return {
+      name,
+      subtotal,
+      importCost,
+      totalCost
+    }
+  })
 }
